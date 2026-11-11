@@ -68,36 +68,69 @@ static void _oval_result_system_scan_entity_for_references(struct oval_syschar_m
 							   struct oval_string_map *objmap,
 							   struct oval_string_map *sttmap, 
 							   struct oval_string_map *varmap, 
-							   struct oval_string_map *sysmap);
+							   struct oval_string_map *sysmap,
+							   int variable_instance);
 
 static void _oval_result_system_scan_set_for_references(struct oval_syschar_model *syschar_model, 
 							struct oval_setobject *set,
 							struct oval_string_map *objmap,
 							struct oval_string_map *sttmap, 
 							struct oval_string_map *varmap, 
-							struct oval_string_map *sysmap);
+							struct oval_string_map *sysmap,
+							int variable_instance);
 
 static void _oval_result_system_scan_object_for_references(struct oval_syschar_model *syschar_model, 
 							struct oval_object *object,
 							struct oval_string_map *objmap,
 							struct oval_string_map *sttmap, 
 							struct oval_string_map *varmap, 
-							struct oval_string_map *sysmap);
+							struct oval_string_map *sysmap,
+							int variable_instance);
 static void _oval_result_system_scan_state_for_references(struct oval_syschar_model *syschar_model, 
 							struct oval_state *state,
 							struct oval_string_map *objmap,
 							struct oval_string_map *sttmap, 
 							struct oval_string_map *varmap, 
-							struct oval_string_map *sysmap);
+							struct oval_string_map *sysmap,
+							int variable_instance);
 
 static void _oval_result_system_scan_component_for_references(struct oval_syschar_model *syschar_model, 
 							struct oval_component *component,	
 							struct oval_string_map *objmap,
 							struct oval_string_map *sttmap, 
 							struct oval_string_map *varmap, 
-							struct oval_string_map *sysmap);
+							struct oval_string_map *sysmap,
+							int variable_instance);
 
 static bool _oval_result_system_resolve_syschar(struct oval_syschar *syschar, struct oval_string_map *sysmap);
+
+static char *_oval_result_system_instance_key(const char *id, int variable_instance)
+{
+	if (variable_instance <= 0)
+		return oscap_strdup(id);
+	size_t key_size = strlen(id) + 24;
+	char *key = malloc(key_size);
+	if (key != NULL)
+		snprintf(key, key_size, "%s#%d", id, variable_instance);
+	return key;
+}
+
+static void _oval_result_system_put_instance(struct oval_string_map *map, const char *id, int variable_instance, void *value)
+{
+	char *key = _oval_result_system_instance_key(id, variable_instance);
+	if (key != NULL) {
+		oval_string_map_put(map, key, value);
+		free(key);
+	}
+}
+
+static void *_oval_result_system_get_instance(struct oval_string_map *map, const char *id, int variable_instance)
+{
+	char *key = _oval_result_system_instance_key(id, variable_instance);
+	void *value = (key == NULL) ? NULL : oval_string_map_get_value(map, key);
+	free(key);
+	return value;
+}
 
 
 
@@ -186,12 +219,52 @@ struct oval_result_definition *oval_result_system_get_definition(struct oval_res
 	return oval_smc_get_last(sys->definitions, id);
 }
 
+struct oval_result_definition *oval_result_system_get_definition_with_instance(struct oval_result_system *sys, const char *id, int variable_instance) {
+	__attribute__nonnull__(sys);
+
+	if (variable_instance <= 0)
+		return oval_result_system_get_definition(sys, id);
+
+	struct oval_iterator *it = oval_smc_get_all_it(sys->definitions, id);
+	if (it == NULL)
+		return NULL;
+
+	struct oval_result_definition *found = NULL;
+	while (found == NULL && oval_collection_iterator_has_more(it)) {
+		struct oval_result_definition *definition = oval_collection_iterator_next(it);
+		if (oval_result_definition_get_instance(definition) == variable_instance)
+			found = definition;
+	}
+	oval_collection_iterator_free(it);
+	return found;
+}
+
 struct oval_result_test *oval_result_system_get_test(struct oval_result_system *sys, char *id) {
 	__attribute__nonnull__(sys);
 
 	// Previously, this structure used to hold only one result_test per given ID.
 	// Now we need to return the very last one from a list.
 	return oval_smc_get_last(sys->tests, id);
+}
+
+struct oval_result_test *oval_result_system_get_test_with_instance(struct oval_result_system *sys, const char *id, int variable_instance) {
+	__attribute__nonnull__(sys);
+
+	if (variable_instance <= 0)
+		return oval_result_system_get_test(sys, (char *) id);
+
+	struct oval_iterator *it = oval_smc_get_all_it(sys->tests, id);
+	if (it == NULL)
+		return NULL;
+
+	struct oval_result_test *found = NULL;
+	while (found == NULL && oval_collection_iterator_has_more(it)) {
+		struct oval_result_test *test = oval_collection_iterator_next(it);
+		if (oval_result_test_get_instance(test) == variable_instance)
+			found = test;
+	}
+	oval_collection_iterator_free(it);
+	return found;
 }
 
 struct oval_result_definition *oval_result_system_get_new_definition
@@ -212,6 +285,16 @@ struct oval_result_definition *oval_result_system_get_new_definition_with_check
 	struct oval_result_definition *rslt_definition = NULL;
 	if (oval_definition) {
 		char *id = oval_definition_get_id(oval_definition);
+		if (variable_instance != 0) {
+			rslt_definition = oval_result_system_get_definition_with_instance(sys, id, variable_instance);
+			if (rslt_definition != NULL)
+				return rslt_definition;
+			rslt_definition = make_result_definition_from_oval_definition(sys, oval_definition, visited_definitions, variable_instance);
+			if (rslt_definition == NULL)
+				return NULL;
+			oval_result_system_add_definition(sys, rslt_definition);
+			return rslt_definition;
+		}
 		rslt_definition = oval_result_system_get_definition(sys, id);
 		if (rslt_definition == NULL) {
 			rslt_definition = make_result_definition_from_oval_definition(sys, oval_definition, visited_definitions,
@@ -234,6 +317,14 @@ struct oval_result_definition *oval_result_system_get_new_definition_with_check
 
 struct oval_result_test *oval_result_system_get_new_test(struct oval_result_system *sys, struct oval_test *oval_test, int variable_instance) {
 	char *id = oval_test_get_id(oval_test);
+	if (variable_instance != 0) {
+		struct oval_result_test *found = oval_result_system_get_test_with_instance(sys, id, variable_instance);
+		if (found != NULL)
+			return found;
+		struct oval_result_test *created = make_result_test_from_oval_test(sys, oval_test, variable_instance);
+		oval_result_system_add_test(sys, created);
+		return created;
+	}
 	struct oval_result_test *rslt_testtest = oval_result_system_get_test(sys, id);
 	if (rslt_testtest == NULL) {
 		//test = oval_result_test_new(sys, id);
@@ -356,11 +447,26 @@ int oval_result_system_eval(struct oval_result_system *sys)
 
 	while (oval_definition_iterator_has_more(definitions_itr)) {
 		struct oval_definition *definition;
-		struct oval_result_definition *rslt_definition;
+		bool evaluated = false;
 
 		definition = oval_definition_iterator_next(definitions_itr);
-		rslt_definition = oval_result_system_get_new_definition(sys, definition, 0);
-		oval_result_definition_eval(rslt_definition);
+		struct oval_iterator *rslt_definitions_it =
+		    oval_smc_get_all_it(sys->definitions, oval_definition_get_id(definition));
+		if (rslt_definitions_it != NULL) {
+			while (oval_collection_iterator_has_more(rslt_definitions_it)) {
+				struct oval_result_definition *rslt_definition =
+				    oval_collection_iterator_next(rslt_definitions_it);
+				oval_result_definition_eval(rslt_definition);
+				evaluated = true;
+			}
+			oval_collection_iterator_free(rslt_definitions_it);
+		}
+		if (!evaluated) {
+			struct oval_result_definition *rslt_definition =
+			    oval_result_system_get_new_definition(sys, definition, 1);
+			if (rslt_definition != NULL)
+				oval_result_definition_eval(rslt_definition);
+		}
 	}
 
 	oval_definition_iterator_free(definitions_itr);
@@ -492,25 +598,26 @@ xmlNode *oval_result_system_to_dom(struct oval_result_system * sys,
 		while (oval_smc_iterator_has_more(result_tests)) {
 			struct oval_state_iterator *ste_itr;
 			struct oval_result_test *result_test = oval_smc_iterator_next(result_tests);
+			int variable_instance = oval_result_test_get_instance(result_test);
 			/* report the test */
 			oval_result_test_to_dom(result_test, doc, tests_node);
 			struct oval_test *oval_test = oval_result_test_get_test(result_test);
 			/* collect the objects that are referenced from reported test */
-			/* look for objects in path: test->object ...  */
+		 /* look for objects in path: test->object ...  */
 			struct oval_object *object = oval_test_get_object(oval_test);
 			if (object) {
 				char *objid = oval_object_get_id(object);
 				/* is object already "collected" */
-				void *value = oval_string_map_get_value(objmap, objid);
+				void *value = _oval_result_system_get_instance(objmap, objid, variable_instance);
 				if (value == NULL) {
 					/* is there a system characteristic for the object */
 					struct oval_syschar *syschar =
-					    oval_syschar_model_get_syschar(syschar_model, objid);
+					    oval_syschar_model_get_syschar_with_instance(syschar_model, objid, variable_instance);
 					if (syschar) {
 						/* put object into map */
-						oval_string_map_put(objmap, objid, object);
+						_oval_result_system_put_instance(objmap, objid, variable_instance, object);
 						_oval_result_system_scan_object_for_references
-						    (syschar_model, object, objmap, sttmap, varmap, sysmap);
+						    (syschar_model, object, objmap, sttmap, varmap, sysmap, variable_instance);
 					}
 				}
 			}
@@ -519,11 +626,11 @@ xmlNode *oval_result_system_to_dom(struct oval_result_system * sys,
 			while (oval_state_iterator_has_more(ste_itr)) {
 				struct oval_state *state = oval_state_iterator_next(ste_itr);
 				char *sttid = oval_state_get_id(state);
-				void *value = oval_string_map_get_value(sttmap, sttid);
+				void *value = _oval_result_system_get_instance(sttmap, sttid, variable_instance);
 				if (value == NULL) {
-					oval_string_map_put(sttmap, sttid, state);
+					_oval_result_system_put_instance(sttmap, sttid, variable_instance, state);
 					_oval_result_system_scan_state_for_references(syschar_model, state, objmap, sttmap,
-										      varmap, sysmap);
+										      varmap, sysmap, variable_instance);
 				}
 			}
 			oval_state_iterator_free(ste_itr);
@@ -568,11 +675,12 @@ static void _oval_result_system_scan_object_for_references
      struct oval_string_map *objmap,
      struct oval_string_map *sttmap, 
      struct oval_string_map *varmap, 
-     struct oval_string_map *sysmap) {
+     struct oval_string_map *sysmap,
+     int variable_instance) {
 	char *objid = oval_object_get_id(object);
-	struct oval_syschar *syschar = oval_syschar_model_get_syschar(syschar_model, objid);
+	struct oval_syschar *syschar = oval_syschar_model_get_syschar_with_instance(syschar_model, objid, variable_instance);
 	if (syschar) /* put syschar of the object into map */
-		oval_string_map_put(sysmap, objid, syschar);
+		_oval_result_system_put_instance(sysmap, objid, variable_instance, syschar);
 	struct oval_object_content_iterator *contents = oval_object_get_object_contents(object);
 	/* see if there are more objects referenced from this object's content */ 
 	while (oval_object_content_iterator_has_more(contents)) {
@@ -580,10 +688,10 @@ static void _oval_result_system_scan_object_for_references
 		struct oval_entity *entity = oval_object_content_get_entity(content);
 		if (entity)
 			_oval_result_system_scan_entity_for_references(syschar_model, entity, objmap, sttmap, varmap,
-								       sysmap);
+								       sysmap, variable_instance);
 		struct oval_setobject *set = oval_object_content_get_setobject(content);
 		if (set)
-			_oval_result_system_scan_set_for_references(syschar_model, set, objmap, sttmap, varmap, sysmap);
+			_oval_result_system_scan_set_for_references(syschar_model, set, objmap, sttmap, varmap, sysmap, variable_instance);
 	}
 	oval_object_content_iterator_free(contents);
 }
@@ -591,14 +699,15 @@ static void _oval_result_system_scan_object_for_references
 static void _oval_result_system_scan_state_for_references
     (struct oval_syschar_model *syschar_model, struct oval_state *state,
      struct oval_string_map *objmap,
-     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap) {
+     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap,
+     int variable_instance) {
 	struct oval_state_content_iterator *contents = oval_state_get_contents(state);
 	while (oval_state_content_iterator_has_more(contents)) {
 		struct oval_state_content *content = oval_state_content_iterator_next(contents);
 		struct oval_entity *entity = oval_state_content_get_entity(content);
 		if (entity)
 			_oval_result_system_scan_entity_for_references(syschar_model, entity, objmap, sttmap, varmap,
-								       sysmap);
+								       sysmap, variable_instance);
 	}
 	oval_state_content_iterator_free(contents);
 }
@@ -606,17 +715,18 @@ static void _oval_result_system_scan_state_for_references
 static void _oval_result_system_scan_component_for_references
     (struct oval_syschar_model *syschar_model, struct oval_component *component,
      struct oval_string_map *objmap,
-     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap) {
+     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap,
+     int variable_instance) {
 	struct oval_variable *variable = oval_component_get_variable(component);
 	if (variable) {
 		char *varid = oval_variable_get_id(variable);
-		void *value = oval_string_map_get_value(varmap, varid);
+		void *value = _oval_result_system_get_instance(varmap, varid, variable_instance);
 		if (value == NULL) {
-			oval_string_map_put(varmap, varid, variable);
+			_oval_result_system_put_instance(varmap, varid, variable_instance, variable);
 			struct oval_component *component2 = oval_variable_get_component(variable);
 			if (component2) {
 				_oval_result_system_scan_component_for_references(syschar_model, component2, objmap,
-										  sttmap, varmap, sysmap);
+										  sttmap, varmap, sysmap, variable_instance);
 			}
 		}
 	} else {
@@ -625,18 +735,18 @@ static void _oval_result_system_scan_component_for_references
 			while (oval_component_iterator_has_more(fcomponents)) {
 				struct oval_component *fcomponent = oval_component_iterator_next(fcomponents);
 				_oval_result_system_scan_component_for_references(syschar_model, fcomponent, objmap,
-										  sttmap, varmap, sysmap);
+										  sttmap, varmap, sysmap, variable_instance);
 			}
 		oval_component_iterator_free(fcomponents);
 
 		struct oval_object *object = oval_component_get_object(component);
 		if (object) {
 			char *objid = oval_object_get_id(object);
-			void *value = oval_string_map_get_value(objmap, objid);
+			void *value = _oval_result_system_get_instance(objmap, objid, variable_instance);
 			if (value == NULL) {
-				oval_string_map_put(objmap, objid, object);
+				_oval_result_system_put_instance(objmap, objid, variable_instance, object);
 				_oval_result_system_scan_object_for_references(syschar_model, object, objmap, sttmap,
-									       varmap, sysmap);
+									       varmap, sysmap, variable_instance);
 			}
 		}
 	}
@@ -645,17 +755,18 @@ static void _oval_result_system_scan_component_for_references
 static void _oval_result_system_scan_entity_for_references
     (struct oval_syschar_model *syschar_model, struct oval_entity *entity,
      struct oval_string_map *objmap,
-     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap) {
+     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap,
+     int variable_instance) {
 	struct oval_variable *variable = oval_entity_get_variable(entity);
 	if (variable) {
 		char *varid = oval_variable_get_id(variable);
-		void *value = oval_string_map_get_value(varmap, varid);
+		void *value = _oval_result_system_get_instance(varmap, varid, variable_instance);
 		if (value == NULL) {
-			oval_string_map_put(varmap, varid, variable);
+			_oval_result_system_put_instance(varmap, varid, variable_instance, variable);
 			struct oval_component *component = oval_variable_get_component(variable);
 			if (component) {
 				_oval_result_system_scan_component_for_references(syschar_model, component, objmap,
-										  sttmap, varmap, sysmap);
+										  sttmap, varmap, sysmap, variable_instance);
 			}
 		}
 	}
@@ -664,17 +775,18 @@ static void _oval_result_system_scan_entity_for_references
 static void _oval_result_system_scan_set_for_references
     (struct oval_syschar_model *syschar_model, struct oval_setobject *set,
      struct oval_string_map *objmap,
-     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap) {
+     struct oval_string_map *sttmap, struct oval_string_map *varmap, struct oval_string_map *sysmap,
+     int variable_instance) {
 	struct oval_object_iterator *objects = oval_setobject_get_objects(set);
 	if (objects)
 		while (oval_object_iterator_has_more(objects)) {
 			struct oval_object *object = oval_object_iterator_next(objects);
 			char *objid = oval_object_get_id(object);
-			void *value = oval_string_map_get_value(objmap, objid);
+			void *value = _oval_result_system_get_instance(objmap, objid, variable_instance);
 			if (value == NULL) {
-				oval_string_map_put(objmap, objid, object);
+				_oval_result_system_put_instance(objmap, objid, variable_instance, object);
 				_oval_result_system_scan_object_for_references(syschar_model, object, objmap, sttmap,
-									       varmap, sysmap);
+									       varmap, sysmap, variable_instance);
 			}
 		}
 	oval_object_iterator_free(objects);
@@ -687,11 +799,11 @@ static void _oval_result_system_scan_set_for_references
 			filter = oval_filter_iterator_next(filters);
 			state = oval_filter_get_state(filter);
 			char *sttid = oval_state_get_id(state);
-			void *value = oval_string_map_get_value(sttmap, sttid);
+			void *value = _oval_result_system_get_instance(sttmap, sttid, variable_instance);
 			if (value == NULL) {
-				oval_string_map_put(sttmap, sttid, state);
+				_oval_result_system_put_instance(sttmap, sttid, variable_instance, state);
 				_oval_result_system_scan_state_for_references(syschar_model, state, objmap, sttmap,
-									      varmap, sysmap);
+									      varmap, sysmap, variable_instance);
 			}
 		}
 	oval_filter_iterator_free(filters);
@@ -700,13 +812,12 @@ static void _oval_result_system_scan_set_for_references
 		while (oval_setobject_iterator_has_more(subsets)) {
 			struct oval_setobject *subset = oval_setobject_iterator_next(subsets);
 			_oval_result_system_scan_set_for_references(syschar_model, subset, objmap, sttmap, varmap,
-								    sysmap);
+								    sysmap, variable_instance);
 		}
 	oval_setobject_iterator_free(subsets);
 }
 
 static bool _oval_result_system_resolve_syschar(struct oval_syschar *syschar, struct oval_string_map *sysmap) {
 	const char *objid = oval_syschar_get_id(syschar);
-	return oval_string_map_get_value(sysmap, objid) != NULL;
+	return _oval_result_system_get_instance(sysmap, objid, oval_syschar_get_variable_instance(syschar)) != NULL;
 }
-

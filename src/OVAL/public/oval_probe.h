@@ -63,6 +63,11 @@ OSCAP_API int oval_probe_query_sysinfo(oval_probe_session_t *sess, struct oval_s
  * @param object the object to evaluate
  */
 OSCAP_API int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *object, int flags, struct oval_syschar **out_syschar) __attribute__ ((nonnull(1, 2)));
+/**
+ * Query an OVAL object for a specific variable_instance.
+ * @memberof oval_probe_session
+ */
+OSCAP_API int oval_probe_query_object_with_instance(oval_probe_session_t *psess, struct oval_object *object, int variable_instance, int flags, struct oval_syschar **out_syschar) __attribute__ ((nonnull(1, 2)));
 
 /**
  * Query the specified variable and all its dependencies in order to compute the vector of its values

@@ -94,7 +94,7 @@ static void _syschar_add_bindings(struct oval_syschar *sc, struct oval_string_ma
 	oval_collection_iterator_free(var_itr);
 }
 
-int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *object, int flags, struct oval_syschar **out_syschar)
+static int _oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *object, int variable_instance, int flags, struct oval_syschar **out_syschar)
 {
 	char *oid;
 	struct oval_syschar *sysc;
@@ -112,10 +112,14 @@ int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *obj
 	type_name = oval_subtype_get_text(type);
 	dI("Querying %s object '%s', flags: %u.", type_name, oid, flags);
 
-	sysc = oval_syschar_model_get_syschar(model, oid);
+	if (variable_instance > 0)
+		sysc = oval_syschar_model_get_syschar_with_instance(model, oid, variable_instance);
+	else
+		sysc = oval_syschar_model_get_syschar(model, oid);
 	if (sysc != NULL) {
 		int variable_instance_hint = oval_syschar_get_variable_instance_hint(sysc);
-		if (oval_syschar_get_variable_instance_hint(sysc) != oval_syschar_get_variable_instance(sysc)) {
+		if (variable_instance <= 0 &&
+		    variable_instance_hint != oval_syschar_get_variable_instance(sysc)) {
 			dI("Creating another syschar for variable_instance=%d)", variable_instance_hint);
 			sysc = oval_syschar_new(model, object);
 			oval_syschar_set_variable_instance(sysc, variable_instance_hint);
@@ -135,6 +139,10 @@ int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *obj
 	} else {
 		dI("Creating new syschar for %s_object '%s'.", type_name, oid);
 		sysc = oval_syschar_new(model, object);
+		if (variable_instance > 0) {
+			oval_syschar_set_variable_instance(sysc, variable_instance);
+			oval_syschar_set_variable_instance_hint(sysc, variable_instance);
+		}
 	}
 
 	if (out_syschar)
@@ -165,6 +173,16 @@ int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *obj
 	}
 
 	return 0;
+}
+
+int oval_probe_query_object(oval_probe_session_t *psess, struct oval_object *object, int flags, struct oval_syschar **out_syschar)
+{
+	return _oval_probe_query_object(psess, object, 0, flags, out_syschar);
+}
+
+int oval_probe_query_object_with_instance(oval_probe_session_t *psess, struct oval_object *object, int variable_instance, int flags, struct oval_syschar **out_syschar)
+{
+	return _oval_probe_query_object(psess, object, variable_instance, flags, out_syschar);
 }
 
 int oval_probe_query_sysinfo(oval_probe_session_t *sess, struct oval_sysinfo **out_sysinfo)
@@ -234,7 +252,7 @@ static int oval_probe_query_var_ref(oval_probe_session_t *sess, struct oval_stat
 	return 1;
 }
 
-int oval_probe_query_test(oval_probe_session_t *sess, struct oval_test *test)
+int oval_probe_query_test_with_instance(oval_probe_session_t *sess, struct oval_test *test, int variable_instance)
 {
 	struct oval_object *object;
 	struct oval_state_iterator *ste_itr;
@@ -254,7 +272,7 @@ int oval_probe_query_test(oval_probe_session_t *sess, struct oval_test *test)
 	}
 
 	/* probe object */
-	ret = oval_probe_query_object(sess, object, 0, NULL);
+	ret = oval_probe_query_object_with_instance(sess, object, variable_instance, 0, NULL);
 	if (ret == -1)
 		return ret;
 	/* probe objects referenced like this: test->state->variable->object */
@@ -272,3 +290,7 @@ int oval_probe_query_test(oval_probe_session_t *sess, struct oval_test *test)
 	return 0;
 }
 
+int oval_probe_query_test(oval_probe_session_t *sess, struct oval_test *test)
+{
+	return oval_probe_query_test_with_instance(sess, test, 0);
+}

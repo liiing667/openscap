@@ -47,6 +47,7 @@
 #include "collectVarRefs_impl.h"
 #include "public/oval_types.h"
 #include "common/util.h"
+#include "common/elements.h"
 #include "common/debug_priv.h"
 #include "common/_error.h"
 
@@ -381,10 +382,47 @@ oval_result_t ores_get_result_byopr(struct oresults *ores, oval_operator_t op)
 	return result;
 }
 
-static inline oval_result_t _evaluate_sysent_with_variable(struct oval_syschar_model *syschar_model, struct oval_variable *state_entity_var, const char *sys_data, oval_operation_t state_entity_operation, oval_check_t var_check)
+static inline oval_result_t _evaluate_sysent_with_variable(struct oval_syschar_model *syschar_model, struct oval_variable *state_entity_var, const char *sys_data, oval_operation_t state_entity_operation, oval_check_t var_check, struct oval_string_map *bindings, bool strict_bindings)
 {
 	oval_syschar_collection_flag_t flag;
 	oval_result_t ent_val_res;
+	const char *variable_id = oval_variable_get_id(state_entity_var);
+	struct oval_variable_binding *binding = NULL;
+
+	if (bindings != NULL)
+		binding = oval_string_map_get_value(bindings, variable_id);
+
+	if (binding != NULL) {
+		struct oresults var_ores;
+		struct oval_string_iterator *val_itr;
+		oval_datatype_t datatype = oval_variable_get_datatype(state_entity_var);
+
+		ores_clear(&var_ores);
+		val_itr = oval_variable_binding_get_values(binding);
+		while (oval_string_iterator_has_more(val_itr)) {
+			char *state_entity_val_text = oval_string_iterator_next(val_itr);
+			oval_result_t var_val_res = oval_str_cmp_str(state_entity_val_text, datatype, sys_data, state_entity_operation);
+			if (var_val_res == OVAL_RESULT_ERROR) {
+				dW("Can't compare variable '%s' value = '%s' with collected item entity = '%s'",
+					variable_id, state_entity_val_text, sys_data);
+			}
+			ores_add_res(&var_ores, var_val_res);
+		}
+		oval_string_iterator_free(val_itr);
+		return ores_get_result_bychk(&var_ores, var_check);
+	}
+
+	if (strict_bindings && oval_variable_get_type(state_entity_var) == OVAL_VARIABLE_EXTERNAL) {
+		dW("No binding for external variable '%s' in this variable_instance.", variable_id);
+		return OVAL_RESULT_UNKNOWN;
+	}
+	if (oval_variable_get_type(state_entity_var) == OVAL_VARIABLE_EXTERNAL) {
+		oval_syschar_collection_flag_t var_flag = oval_variable_get_collection_flag(state_entity_var);
+		if (var_flag == SYSCHAR_FLAG_UNKNOWN || var_flag == SYSCHAR_FLAG_NOT_COLLECTED) {
+			dW("External variable '%s' has no binding in this variable_instance.", variable_id);
+			return OVAL_RESULT_UNKNOWN;
+		}
+	}
 
 	if (0 != oval_syschar_model_compute_variable(syschar_model, state_entity_var)) {
 		return -1;
@@ -464,7 +502,8 @@ static struct record_field_instance _oval_record_field_iterator_next_instance(st
 	return instance;
 }
 
-static oval_result_t _evaluate_sysent_record(struct oval_syschar_model *syschar_model, struct oval_state_content *state_content, struct oval_sysent *item_entity)
+static oval_result_t _evaluate_sysent_record(struct oval_syschar_model *syschar_model, struct oval_state_content *state_content, struct oval_sysent *item_entity,
+					     struct oval_string_map *bindings, bool strict_bindings)
 {
 	struct oresults record_ores;
 	ores_clear(&record_ores);
@@ -486,7 +525,7 @@ static oval_result_t _evaluate_sysent_record(struct oval_syschar_model *syschar_
 				field_found = true;
 				oval_result_t fields_comparison_result;
 				if (state_rf.var != NULL) {
-					fields_comparison_result = _evaluate_sysent_with_variable(syschar_model, state_rf.var, item_rf.value, state_rf.operation, state_rf.var_check);
+					fields_comparison_result = _evaluate_sysent_with_variable(syschar_model, state_rf.var, item_rf.value, state_rf.operation, state_rf.var_check, bindings, strict_bindings);
 				} else {
 					fields_comparison_result = oval_str_cmp_str(state_rf.value, state_rf.data_type, item_rf.value, state_rf.operation);
 				}
@@ -509,7 +548,7 @@ static oval_result_t _evaluate_sysent_record(struct oval_syschar_model *syschar_
 	return ores_get_result_byopr(&record_ores, OVAL_OPERATOR_AND);
 }
 
-static inline oval_result_t _evaluate_sysent(struct oval_syschar_model *syschar_model, struct oval_sysent *item_entity, struct oval_entity *state_entity, oval_operation_t state_entity_operation, struct oval_state_content *content)
+static inline oval_result_t _evaluate_sysent(struct oval_syschar_model *syschar_model, struct oval_sysent *item_entity, struct oval_entity *state_entity, oval_operation_t state_entity_operation, struct oval_state_content *content, struct oval_string_map *bindings, bool strict_bindings)
 {
 	if (oval_sysent_get_status(item_entity) == SYSCHAR_STATUS_DOES_NOT_EXIST) {
 		return OVAL_RESULT_FALSE;
@@ -524,7 +563,7 @@ static inline oval_result_t _evaluate_sysent(struct oval_syschar_model *syschar_
 
 		return _evaluate_sysent_with_variable(syschar_model,
 				state_entity_var, sys_data,
-				state_entity_operation, var_check);
+				state_entity_operation, var_check, bindings, strict_bindings);
 	} else {
 		struct oval_value *state_entity_val;
 		char *state_entity_val_text;
@@ -536,7 +575,7 @@ static inline oval_result_t _evaluate_sysent(struct oval_syschar_model *syschar_
 				dE("The only allowed operation for comparing record types is 'equals'.");
 				return OVAL_RESULT_ERROR;
 			}
-			return _evaluate_sysent_record(syschar_model, content, item_entity);
+			return _evaluate_sysent_record(syschar_model, content, item_entity, bindings, strict_bindings);
 		} else {
 			if ((state_entity_val = oval_entity_get_value(state_entity)) == NULL) {
 				oscap_seterr(OSCAP_EFAMILY_OVAL, "OVAL internal error: found NULL entity value");
@@ -554,7 +593,8 @@ static inline oval_result_t _evaluate_sysent(struct oval_syschar_model *syschar_
 	}
 }
 
-static oval_result_t eval_item(struct oval_syschar_model *syschar_model, struct oval_sysitem *cur_sysitem, struct oval_state *state)
+static oval_result_t eval_item(struct oval_syschar_model *syschar_model, struct oval_sysitem *cur_sysitem, struct oval_state *state,
+			       struct oval_string_map *bindings, bool strict_bindings)
 {
 	struct oval_state_content_iterator *state_contents_itr;
 	struct oresults ste_ores;
@@ -651,7 +691,7 @@ static oval_result_t eval_item(struct oval_syschar_model *syschar_model, struct 
 				oval_sysent_set_mask(item_entity,1);
 
 			ent_val_res = _evaluate_sysent(syschar_model, item_entity, state_entity,
-					state_entity_operation, content);
+					state_entity_operation, content, bindings, strict_bindings);
 			if (ent_val_res == OVAL_RESULT_TRUE) {
 				dI("Entity '%s'='%s' of item '%s' matches corresponding entity in state '%s'.",
 						oval_sysent_get_name(item_entity),
@@ -705,6 +745,7 @@ static oval_result_t eval_item(struct oval_syschar_model *syschar_model, struct 
 #define ITEMMAP (struct oval_string_map    *)args[2]
 #define TEST    (struct oval_result_test   *)args[1]
 #define SYSTEM  (struct oval_result_system *)args[0]
+#define BINDINGS (struct oval_string_map   *)args[3]
 
 static void _oval_test_item_consumer(struct oval_result_item *item, void **args) {
 	struct oval_sysitem *oval_sysitem = oval_result_item_get_sysitem(item);
@@ -721,6 +762,13 @@ static void _oval_test_item_consumer(struct oval_result_item *item, void **args)
 static oval_result_t eval_check_state(struct oval_test *test, void **args)
 {
 	struct oval_syschar_model *syschar_model;
+	struct oval_result_test *rtest = TEST;
+	bool strict_bindings = rtest->bindings_initialized;
+	if (!strict_bindings) {
+		struct oval_variable_binding_iterator *bindings = oval_result_test_get_bindings(rtest);
+		strict_bindings = oval_variable_binding_iterator_has_more(bindings);
+		oval_variable_binding_iterator_free(bindings);
+	}
 	struct oval_result_item_iterator *ritems_itr;
 	struct oresults item_ores;
 	oval_result_t result;
@@ -776,7 +824,7 @@ static oval_result_t eval_check_state(struct oval_test *test, void **args)
 			oval_result_t ste_res;
 
 			ste = oval_state_iterator_next(ste_itr);
-			ste_res = eval_item(syschar_model, item, ste);
+			ste_res = eval_item(syschar_model, item, ste, BINDINGS, strict_bindings);
 			ores_add_res(&ste_ores, ste_res);
 		}
 		oval_state_iterator_free(ste_itr);
@@ -1017,6 +1065,37 @@ _oval_result_test_evaluate_items(struct oval_test *test, struct oval_syschar *sy
 	return result;
 }
 
+static void _oval_result_test_put_binding(struct oval_string_map *bindings, struct oval_variable_binding *binding)
+{
+	struct oval_variable *variable = oval_variable_binding_get_variable(binding);
+	if (variable == NULL)
+		return;
+	const char *variable_id = oval_variable_get_id(variable);
+	if (variable_id != NULL && oval_string_map_get_value(bindings, variable_id) == NULL)
+		oval_string_map_put(bindings, variable_id, binding);
+}
+
+static struct oval_string_map *_oval_result_test_collect_binding_map(struct oval_result_test *rtest, struct oval_syschar *syschar)
+{
+	struct oval_string_map *bindings = oval_string_map_new();
+
+	struct oval_variable_binding_iterator *it = oval_result_test_get_bindings(rtest);
+	while (oval_variable_binding_iterator_has_more(it)) {
+		_oval_result_test_put_binding(bindings, oval_variable_binding_iterator_next(it));
+	}
+	oval_variable_binding_iterator_free(it);
+
+	if (syschar != NULL) {
+		it = oval_syschar_get_variable_bindings(syschar);
+		while (oval_variable_binding_iterator_has_more(it)) {
+			_oval_result_test_put_binding(bindings, oval_variable_binding_iterator_next(it));
+		}
+		oval_variable_binding_iterator_free(it);
+	}
+
+	return bindings;
+}
+
 /* this function will gather all the necessary ingredients and call 'evaluate_items' when it finds them */
 static oval_result_t _oval_result_test_result(struct oval_result_test *rtest, void **args)
 {
@@ -1037,9 +1116,10 @@ static oval_result_t _oval_result_test_result(struct oval_result_test *rtest, vo
 	struct oval_result_system *sys = oval_result_test_get_system(rtest);
 	struct oval_results_model *results_model = oval_result_system_get_results_model(sys);
 	struct oval_probe_session *probe_session = oval_results_model_get_probe_session(results_model);
+	int variable_instance = oval_result_test_get_instance(rtest);
 	if (probe_session != NULL) {
 		/* probe test */
-		int ret = oval_probe_query_test(probe_session, test);
+		int ret = oval_probe_query_test_with_instance(probe_session, test, variable_instance);
 		if (ret != 0) {
 			return ret;
 		}
@@ -1047,15 +1127,20 @@ static oval_result_t _oval_result_test_result(struct oval_result_test *rtest, vo
 
 	struct oval_syschar_model *syschar_model = oval_result_system_get_syschar_model(sys);
 
-	struct oval_syschar * syschar = oval_syschar_model_get_syschar(syschar_model, object_id);
+	struct oval_syschar * syschar = oval_syschar_model_get_syschar_with_instance(syschar_model, object_id, variable_instance);
 	if (syschar == NULL) {
-		dW("No syschar for object: %s", object_id);
+		dW("No syschar for object: %s (variable_instance: %d)", object_id, variable_instance);
 		return OVAL_RESULT_UNKNOWN;
 	}
+
+	struct oval_string_map *bindings = _oval_result_test_collect_binding_map(rtest, syschar);
+	args[3] = bindings;
 
 	/* evaluate items */
 	oval_result_t result = _oval_result_test_evaluate_items(test, syschar, args);
 
+	args[3] = NULL;
+	oval_string_map_free(bindings, NULL);
 	return result;
 #else
 	return OVAL_RESULT_UNKNOWN;
@@ -1114,7 +1199,8 @@ static void _oval_result_test_initialize_bindings(struct oval_result_test *rslt_
 		char *object_id = oval_object_get_id(oval_object);
 		struct oval_result_system *sys = oval_result_test_get_system(rslt_test);
 		struct oval_syschar_model *syschar_model = oval_result_system_get_syschar_model(sys);
-		struct oval_syschar *syschar = oval_syschar_model_get_syschar(syschar_model, object_id);
+		int variable_instance = oval_result_test_get_instance(rslt_test);
+		struct oval_syschar *syschar = oval_syschar_model_get_syschar_with_instance(syschar_model, object_id, variable_instance);
 		/* no syschar if system characteristics was a subset of definitions */
 		if(syschar) {
 			struct oval_variable_binding_iterator *bindings = oval_syschar_get_variable_bindings(syschar);
@@ -1158,7 +1244,7 @@ oval_result_t oval_result_test_eval(struct oval_result_test *rtest)
 	if (rtest->result == OVAL_RESULT_NOT_EVALUATED) {
 		if (oval_test_get_subtype(oval_result_test_get_test(rtest)) != OVAL_INDEPENDENT_UNKNOWN) {
 			struct oval_string_map *tmp_map = oval_string_map_new();
-			void *args[] = { rtest->system, rtest, tmp_map };
+			void *args[] = { rtest->system, rtest, tmp_map, NULL };
 			dIndent(1);
 			rtest->result = _oval_result_test_result(rtest, args);
 			dIndent(-1);
@@ -1250,6 +1336,12 @@ static void _oval_test_message_consumer(struct oval_message *message, struct ova
 	oval_result_test_add_message(test, message);
 }
 
+static void _oval_result_test_binding_value_consumer(char *value, void *user)
+{
+	struct oval_variable_binding *binding = (struct oval_variable_binding *) user;
+	oval_variable_binding_add_value(binding, oscap_strdup(value));
+}
+
 static int _oval_result_test_binding_parse(xmlTextReaderPtr reader, struct oval_parser_context *context, void **args) {
 	int return_code = 0;
 
@@ -1261,12 +1353,10 @@ static int _oval_result_test_binding_parse(xmlTextReaderPtr reader, struct oval_
 	struct oval_variable *variable = oval_definition_model_get_new_variable
 	    (definition_model, (char *)variable_id, OVAL_VARIABLE_UNKNOWN);
 
-	xmlChar *value = xmlTextReaderValue(reader);
-
-	struct oval_variable_binding *binding = oval_variable_binding_new(variable, oscap_strdup((char *) value));
+	struct oval_variable_binding *binding = oval_variable_binding_new(variable, NULL);
+	return_code = oscap_parser_text_value(reader, &_oval_result_test_binding_value_consumer, binding);
 	oval_result_test_add_binding(TEST, binding);
 
-	xmlFree(value);
 	xmlFree(variable_id);
 
 	return return_code;

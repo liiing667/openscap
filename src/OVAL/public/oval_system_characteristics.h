@@ -274,6 +274,15 @@ OSCAP_API struct oval_sysinfo *oval_syschar_model_get_sysinfo(struct oval_syscha
  */
 OSCAP_API struct oval_syschar *oval_syschar_model_get_syschar(struct oval_syschar_model *model, const char *object_id);
 /**
+ * Return the oval_syschar bound to a specified object_id and variable_instance.
+ * If no syschar matches the requested variable_instance, NULL is returned.
+ * @param model the queried oval_syschar_model.
+ * @param object_id the specified object_id.
+ * @param variable_instance the requested variable_instance.
+ * @memberof oval_syschar_model
+ */
+OSCAP_API struct oval_syschar *oval_syschar_model_get_syschar_with_instance(struct oval_syschar_model *model, const char *object_id, int variable_instance);
+/**
  * Get the oval_values bound to a specified variable.
  * @memberof oval_syschar_model
  */

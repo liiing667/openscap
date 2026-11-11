@@ -282,6 +282,28 @@ struct oval_syschar *oval_syschar_model_get_syschar(struct oval_syschar_model *m
 	return (struct oval_syschar *)oval_smc_get_last(model->syschar_map, object_id);
 }
 
+struct oval_syschar *oval_syschar_model_get_syschar_with_instance(struct oval_syschar_model *model, const char *object_id, int variable_instance)
+{
+	__attribute__nonnull__(model);
+	__attribute__nonnull__(object_id);
+
+	if (variable_instance <= 0)
+		return oval_syschar_model_get_syschar(model, object_id);
+
+	struct oval_iterator *it = oval_smc_get_all_it(model->syschar_map, object_id);
+	if (it == NULL)
+		return NULL;
+
+	struct oval_syschar *found = NULL;
+	while (found == NULL && oval_collection_iterator_has_more(it)) {
+		struct oval_syschar *syschar = oval_collection_iterator_next(it);
+		if (oval_syschar_get_variable_instance(syschar) == variable_instance)
+			found = syschar;
+	}
+	oval_collection_iterator_free(it);
+	return found;
+}
+
 struct oval_sysitem *oval_syschar_model_get_sysitem(struct oval_syschar_model *model, const char *id)
 {
 	__attribute__nonnull__(model);
@@ -296,6 +318,25 @@ struct oval_syschar *oval_syschar_model_get_new_syschar(struct oval_syschar_mode
 	struct oval_syschar *syschar = oval_syschar_model_get_syschar(model, object_id);
 	if (syschar == NULL) {
 		syschar = oval_syschar_new(model, object);
+	}
+	return syschar;
+}
+
+struct oval_syschar *oval_syschar_model_get_new_syschar_with_instance(struct oval_syschar_model *model, struct oval_object *object, int variable_instance)
+{
+	char *object_id = oval_object_get_id(object);
+	struct oval_syschar *syschar;
+	if (variable_instance > 0) {
+		syschar = oval_syschar_model_get_syschar_with_instance(model, object_id, variable_instance);
+	} else {
+		syschar = oval_syschar_model_get_syschar(model, object_id);
+	}
+	if (syschar == NULL) {
+		syschar = oval_syschar_new(model, object);
+		if (variable_instance > 0) {
+			oval_syschar_set_variable_instance(syschar, variable_instance);
+			oval_syschar_set_variable_instance_hint(syschar, variable_instance);
+		}
 	}
 	return syschar;
 }
@@ -414,4 +455,3 @@ int oval_syschar_model_export(struct oval_syschar_model *model, const char *file
 	oval_syschar_model_to_dom(model, doc, NULL, NULL, NULL, true);
 	return oscap_xml_save_filename_free(file, doc);
 }
-

@@ -49,6 +49,7 @@
 #define OVAL_PROBE_MAXRETRY 0
 
 int oval_probe_query_test(oval_probe_session_t *sess, struct oval_test *test);
+int oval_probe_query_test_with_instance(oval_probe_session_t *sess, struct oval_test *test, int variable_instance);
 
 
 extern probe_ncache_t *OSCAP_GSYM(ncache);

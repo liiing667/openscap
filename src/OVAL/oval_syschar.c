@@ -301,7 +301,10 @@ int oval_syschar_parse_tag(xmlTextReaderPtr reader, struct oval_parser_context *
 		struct oval_object *object = oval_definition_model_get_new_object(context->definition_model, object_id);
 		free(object_id);
 
-		oval_syschar_t *syschar = oval_syschar_model_get_new_syschar(context->syschar_model, object);
+		int variable_instance = oval_parser_int_attribute(reader, "variable_instance", 1);
+		oval_syschar_t *syschar = oval_syschar_model_get_new_syschar_with_instance(context->syschar_model, object, variable_instance);
+		oval_syschar_set_variable_instance(syschar, variable_instance);
+		oval_syschar_set_variable_instance_hint(syschar, variable_instance);
 		char *flag = (char *)xmlTextReaderGetAttribute(reader, BAD_CAST "flag");
 		oval_syschar_collection_flag_t flag_enum = oval_syschar_flag_parse(reader, "flag", SYSCHAR_FLAG_UNKNOWN);
 		free(flag);

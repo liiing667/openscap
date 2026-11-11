@@ -266,6 +266,14 @@ OSCAP_API struct oval_result_definition *oval_result_system_get_definition(struc
 /**
  * @memberof oval_result_system
  */
+OSCAP_API struct oval_result_definition *oval_result_system_get_definition_with_instance(struct oval_result_system *, const char *, int);
+/**
+ * @memberof oval_result_system
+ */
+OSCAP_API struct oval_result_test *oval_result_system_get_test_with_instance(struct oval_result_system *, const char *, int);
+/**
+ * @memberof oval_result_system
+ */
 OSCAP_API struct oval_result_definition_iterator *oval_result_system_get_definitions(struct oval_result_system *);
 /**
  * @memberof oval_result_system
@@ -740,4 +748,3 @@ OSCAP_API void oval_result_criteria_node_iterator_free(struct oval_result_criter
  */
 
 #endif				/* OVAL_RESULTS_H_ */
-

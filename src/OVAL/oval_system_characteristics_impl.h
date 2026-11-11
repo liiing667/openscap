@@ -69,6 +69,7 @@ xmlNode *oval_syschar_model_to_dom(struct oval_syschar_model *, xmlDocPtr, xmlNo
 void oval_syschar_model_reset(struct oval_syschar_model *model);
 
 struct oval_syschar *oval_syschar_model_get_new_syschar(struct oval_syschar_model *, struct oval_object *);
+struct oval_syschar *oval_syschar_model_get_new_syschar_with_instance(struct oval_syschar_model *, struct oval_object *, int variable_instance);
 struct oval_sysitem *oval_syschar_model_get_new_sysitem(struct oval_syschar_model *, const char *id);
 void oval_syschar_model_add_syschar(struct oval_syschar_model *model, struct oval_syschar *syschar);
 void oval_syschar_model_add_sysitem(struct oval_syschar_model *model, struct oval_sysitem *sysitem);

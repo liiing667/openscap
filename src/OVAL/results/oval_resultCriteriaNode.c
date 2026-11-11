@@ -183,7 +183,7 @@ struct oval_result_criteria_node *oval_result_criteria_node_clone
 								 negate,
 								 applicability_check,
 								 new_test,
-								 1);
+								 oval_result_test_get_instance(new_test));
 		};
 		break;
 	case OVAL_NODETYPE_EXTENDDEF:{
@@ -193,7 +193,7 @@ struct oval_result_criteria_node *oval_result_criteria_node_clone
 								 OVAL_NODETYPE_EXTENDDEF,
 								 negate,
 								 applicability_check,
-								 new_def, 1);
+								 new_def, oval_result_definition_get_instance(new_def));
 		} break;
 	default:
 		break;
@@ -274,7 +274,7 @@ struct oval_result_criteria_node *make_result_criteria_node_from_oval_criteria_n
 									  type,
 									  negate,
 									  applicability_check,
-									  rslt_test, 1);
+									  rslt_test, variable_instance);
 			} break;
 		case OVAL_NODETYPE_EXTENDDEF:{
 				struct oval_definition *oval_definition = oval_criteria_node_get_definition(oval_node);
@@ -286,7 +286,7 @@ struct oval_result_criteria_node *make_result_criteria_node_from_oval_criteria_n
 									  type,
 									  negate,
 									  applicability_check,
-									  rslt_definition, 1);
+									  rslt_definition, variable_instance);
 			} break;
 		default:
 			rslt_node = NULL;
